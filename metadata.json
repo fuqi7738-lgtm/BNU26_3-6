@@ -1,0 +1,5 @@
+{
+  "name": "BNU 2026 Academic Calendar Planner",
+  "description": "A monthly academic calendar for March to June 2026 based on the Beijing Normal University schedule, featuring week numbers, editable daily tasks, and PDF export functionality.",
+  "requestFramePermissions": []
+}
