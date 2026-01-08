@@ -1,10 +1,24 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import MonthlyCalendar from './components/MonthlyCalendar';
-import { CalendarState, Course } from './types';
-import { ChevronLeft, ChevronRight, FileDown, Calendar as CalendarIcon, Info, BookOpen, Plus, Trash2, X, Check } from 'lucide-react';
+import WeeklyCalendar from './components/WeeklyCalendar';
+import { Course } from './types';
+import { getWeekNumber } from './utils/dateUtils';
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  FileDown, 
+  Calendar as CalendarIcon, 
+  BookOpen, 
+  Plus, 
+  Trash2, 
+  X, 
+  LayoutGrid, 
+  List,
+  Hash
+} from 'lucide-react';
 
 const COURSE_COLORS = [
   { name: '蓝色', hex: '#3b82f6', bg: '#dbeafe', text: '#1d4ed8' },
@@ -18,31 +32,43 @@ const COURSE_COLORS = [
 ];
 
 const App: React.FC = () => {
-  const [currentMonthIdx, setCurrentMonthIdx] = useState(0);
-  const months = [2, 3, 4, 5]; 
+  const months = useMemo(() => [2, 3, 4, 5], []); // Mar, Apr, May, Jun
   const year = 2026;
+  const maxWeeks = 18; 
+
+  const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
+  const [currentMonthIdx, setCurrentMonthIdx] = useState(0);
+  const [currentWeekNum, setCurrentWeekNum] = useState(1);
+  
+  useEffect(() => {
+    const now = new Date();
+    const week = getWeekNumber(now);
+    if (week && week >= 1 && week <= maxWeeks) {
+      setCurrentWeekNum(week);
+    }
+  }, [maxWeeks]);
 
   const [notes, setNotes] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('bnu-calendar-notes-2026');
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = localStorage.getItem('bnu-calendar-notes-2026');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
   });
 
   const [courses, setCourses] = useState<Course[]>(() => {
-    const saved = localStorage.getItem('bnu-calendar-courses-2026');
-    if (!saved) return [];
-    
-    const parsed = JSON.parse(saved);
-    return parsed.map((c: any) => {
-      if (typeof c.weekday === 'number') {
-        return {
-          ...c,
-          weekdays: [c.weekday],
-          weekday: undefined,
-          color: c.color || '#3b82f6'
-        };
-      }
-      return { ...c, color: c.color || '#3b82f6' };
-    });
+    try {
+      const saved = localStorage.getItem('bnu-calendar-courses-2026');
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.map((c: any) => ({
+        ...c,
+        color: c.color || '#3b82f6'
+      })) : [];
+    } catch (e) {
+      return [];
+    }
   });
 
   const [isExporting, setIsExporting] = useState(false);
@@ -65,10 +91,10 @@ const App: React.FC = () => {
   }, [courses]);
 
   const handleNoteChange = useCallback((date: string, content: string) => {
-    setNotes(prev => ({
-      ...prev,
-      [date]: content
-    }));
+    setNotes(prev => {
+      if (prev[date] === content) return prev;
+      return { ...prev, [date]: content };
+    });
   }, []);
 
   const handleAddCourse = (e: React.FormEvent) => {
@@ -77,7 +103,6 @@ const App: React.FC = () => {
       alert("请输入课程名称并至少选择一个上课时间");
       return;
     }
-    
     const course: Course = {
       id: Date.now().toString(),
       name: newCourse.name,
@@ -86,20 +111,8 @@ const App: React.FC = () => {
       endWeek: newCourse.endWeek || 16,
       color: newCourse.color || '#3b82f6'
     };
-
     setCourses(prev => [...prev, course]);
     setNewCourse({ ...newCourse, name: '', weekdays: [], color: '#3b82f6' });
-  };
-
-  const toggleWeekday = (day: number) => {
-    setNewCourse(prev => {
-      const current = prev.weekdays || [];
-      if (current.includes(day)) {
-        return { ...prev, weekdays: current.filter(d => d !== day) };
-      } else {
-        return { ...prev, weekdays: [...current, day].sort() };
-      }
-    });
   };
 
   const deleteCourse = (id: string) => {
@@ -112,47 +125,108 @@ const App: React.FC = () => {
 
     setIsExporting(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 500)); 
 
       const canvas = await html2canvas(element, {
-        scale: 4, 
+        scale: 2.2, 
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
         onclone: (clonedDoc) => {
           const clonedElement = clonedDoc.getElementById('calendar-view');
           if (clonedElement) {
-            clonedElement.style.width = '1440px';
-            clonedElement.style.maxWidth = 'none';
-            clonedElement.style.padding = '40px';
-            clonedElement.style.borderRadius = '0';
+            const exportWidth = 2400;
+            clonedElement.style.width = `${exportWidth}px`; 
+            clonedElement.style.padding = '60px';
             clonedElement.style.boxShadow = 'none';
 
-            const noteContainers = clonedElement.querySelectorAll('.overflow-y-auto');
-            noteContainers.forEach(div => {
+            // 1. 页眉布局调整：月份标题居中，副标题左对齐
+            const headerTitle = clonedElement.querySelector('h2');
+            const subHeader = clonedElement.querySelector('p.text-gray-400') || clonedElement.querySelector('p.text-gray-500');
+            
+            const headerContainer = headerTitle?.parentElement;
+            if (headerContainer) {
+                // 容器设为左对齐，以便副标题左对齐
+                headerContainer.style.textAlign = 'left';
+                headerContainer.style.marginBottom = '50px';
+                headerContainer.style.width = '100%';
+            }
+
+            if (headerTitle) {
+                headerTitle.style.fontSize = '72px';
+                headerTitle.style.fontWeight = '900';
+                headerTitle.style.marginBottom = '20px';
+                headerTitle.style.display = 'block';
+                headerTitle.style.textAlign = 'center'; // 月份居中
+                headerTitle.style.width = '100%';
+            }
+            if (subHeader) {
+                (subHeader as HTMLElement).style.fontSize = '32px';
+                (subHeader as HTMLElement).style.display = 'block';
+                (subHeader as HTMLElement).style.marginTop = '0';
+                (subHeader as HTMLElement).style.textAlign = 'left'; // 副标题靠左
+                (subHeader as HTMLElement).style.color = '#6b7280';
+            }
+
+            // 2. 表格布局：第一列（周次）设为窄列 (70px)
+            const gridContainers = clonedElement.querySelectorAll('.grid-cols-\\[32px_repeat\\(7\\,1fr\\)\\]');
+            gridContainers.forEach(grid => {
+              (grid as HTMLElement).style.gridTemplateColumns = '70px repeat(7, 1fr)';
+            });
+
+            // 3. 表头行（星期列）行高自适应
+            const headerRowCells = clonedElement.querySelectorAll('.h-8.md\\:h-10');
+            headerRowCells.forEach(cell => {
+              (cell as HTMLElement).style.height = 'auto';
+              (cell as HTMLElement).style.minHeight = '70px';
+              (cell as HTMLElement).style.display = 'flex';
+              (cell as HTMLElement).style.alignItems = 'center';
+              (cell as HTMLElement).style.justifyContent = 'center';
+            });
+
+            // 4. 动态计算行高
+            const targetTotalHeight = exportWidth * 0.707;
+            const cells = clonedElement.querySelectorAll('.md\\:h-36, .h-24');
+            const rowCount = Math.max(cells.length / 8, 1);
+            const calculatedRowHeight = (targetTotalHeight - 450) / rowCount; 
+            
+            cells.forEach(el => {
+              (el as HTMLElement).style.height = 'auto';
+              (el as HTMLElement).style.minHeight = `${Math.max(calculatedRowHeight, 300)}px`;
+            });
+
+            // 5. 文字优化：行高适当减小防止溢出
+            clonedElement.querySelectorAll('.text-\\[7px\\], .text-\\[9px\\], .text-\\[10px\\], .text-xs, .text-gray-500').forEach(el => {
+              (el as HTMLElement).style.fontSize = '24px';
+              (el as HTMLElement).style.lineHeight = '1.25';
+              (el as HTMLElement).style.fontWeight = '500';
+            });
+            
+            clonedElement.querySelectorAll('.text-sm, .md\\:text-base').forEach(el => {
+              (el as HTMLElement).style.fontSize = '30px';
+            });
+
+            // 6. 增强色块
+            clonedElement.querySelectorAll('.rounded-full, [style*="background-color"]').forEach(el => {
+              const htmlEl = el as HTMLElement;
+              const bgColor = htmlEl.style.backgroundColor;
+              if (bgColor && (bgColor.includes('0.1') || bgColor.includes('15%'))) {
+                htmlEl.style.backgroundColor = bgColor.replace(/0\.1\d*/, '0.35').replace(/15%/, '35%');
+                htmlEl.style.border = '2px solid rgba(0,0,0,0.1)';
+              }
+            });
+
+            // 7. 处理溢出
+            clonedElement.querySelectorAll('.overflow-y-auto, .scrollbar-hide').forEach(div => {
               (div as HTMLElement).style.overflow = 'visible';
               (div as HTMLElement).style.height = 'auto';
-              (div as HTMLElement).style.maxHeight = 'none';
             });
-
-            const truncatedElements = clonedElement.querySelectorAll('.truncate');
-            truncatedElements.forEach(el => {
+            clonedElement.querySelectorAll('.truncate').forEach(el => {
               el.classList.remove('truncate');
-              (el as HTMLElement).style.whiteSpace = 'normal';
-              (el as HTMLElement).style.wordBreak = 'break-word';
-              (el as HTMLElement).style.overflow = 'visible';
+              (el as HTMLElement).style.whiteSpace = 'pre-wrap';
+              (el as HTMLElement).style.wordBreak = 'break-all';
+              (el as HTMLElement).style.display = 'block';
             });
-
-            const dayCells = clonedElement.querySelectorAll('.min-h-\\[80px\\]');
-            dayCells.forEach(cell => {
-              (cell as HTMLElement).style.height = 'auto';
-              (cell as HTMLElement).style.minHeight = '140px'; 
-            });
-
-            const gridContainer = clonedElement.querySelector('.grid');
-            if (gridContainer) {
-              (gridContainer as HTMLElement).style.gridTemplateColumns = '80px repeat(7, 1fr)';
-            }
           }
         }
       });
@@ -166,231 +240,321 @@ const App: React.FC = () => {
 
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pdfWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const canvasRatio = canvas.width / canvas.height;
+      
+      const marginMm = 4;
+      const availableWidth = pdfWidth - (marginMm * 2);
+      const availableHeight = pdfHeight - (marginMm * 2);
 
-      if (imgHeight > pdfHeight) {
-        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      let finalWidth, finalHeight;
+      const availableRatio = availableWidth / availableHeight;
+
+      if (canvasRatio > availableRatio) {
+        finalWidth = availableWidth;
+        finalHeight = availableWidth / canvasRatio;
       } else {
-        const yOffset = (pdfHeight - imgHeight) / 2;
-        pdf.addImage(imgData, 'PNG', 0, yOffset, imgWidth, imgHeight);
+        finalHeight = availableHeight;
+        finalWidth = availableHeight * canvasRatio;
       }
 
-      pdf.save(`BNU校历_2026年${months[currentMonthIdx] + 1}月.pdf`);
+      const xOffset = (pdfWidth - finalWidth) / 2;
+      const yOffset = (pdfHeight - finalHeight) / 2;
+
+      pdf.addImage(imgData, 'PNG', xOffset, yOffset, finalWidth, finalHeight);
+      const suffix = viewMode === 'month' ? `-${months[currentMonthIdx] + 1}月` : `-第${currentWeekNum}周`;
+      pdf.save(`BNU-2026-校历${suffix}.pdf`);
     } catch (error) {
-      console.error('PDF Export failed:', error);
-      alert('PDF导出失败，请检查浏览器权限');
+      console.error('PDF Export Error:', error);
+      alert('导出失败，请重试');
     } finally {
       setIsExporting(false);
     }
   };
 
-  const nextMonth = () => currentMonthIdx < months.length - 1 && setCurrentMonthIdx(currentMonthIdx + 1);
-  const prevMonth = () => currentMonthIdx > 0 && setCurrentMonthIdx(currentMonthIdx - 1);
+  const switchToWeekView = (week?: number) => {
+    if (week) {
+      setCurrentWeekNum(week);
+    } else {
+      const todayWeek = getWeekNumber(new Date());
+      if (todayWeek && todayWeek >= 1 && todayWeek <= maxWeeks) {
+        setCurrentWeekNum(todayWeek);
+      }
+    }
+    setViewMode('week');
+  };
 
-  const WEEK_DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+  const nextWeek = () => setCurrentWeekNum(prev => Math.min(prev + 1, maxWeeks));
+  const prevWeek = () => setCurrentWeekNum(prev => Math.max(prev - 1, 1));
+
+  const handleDayJump = (date: string) => {
+    const d = new Date(date);
+    const week = getWeekNumber(d);
+    if (week) {
+      setCurrentWeekNum(week);
+      setViewMode('week');
+    }
+  };
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-1 md:px-4 py-4 md:py-8 overflow-x-hidden min-h-screen text-gray-900">
-      <header className="flex flex-col items-center justify-between mb-4 md:mb-8 gap-4 sticky top-0 bg-gray-50/95 backdrop-blur-sm z-30 py-2 md:py-4 border-b border-gray-200">
-        <div className="flex items-center gap-2 md:gap-3 w-full justify-center md:justify-start">
-          <div className="bg-red-700 p-1.5 md:p-2.5 rounded-lg shadow-md">
-            <CalendarIcon className="w-5 h-5 md:w-7 md:h-7 text-white" />
-          </div>
-          <div className="text-center md:text-left">
-            <h1 className="text-lg md:text-2xl font-extrabold text-gray-900 leading-tight">2026 校历规划</h1>
-            <p className="text-gray-500 text-[10px] md:text-sm font-medium">北京师范大学 | Spring 2026</p>
+    <div className="max-w-7xl mx-auto px-4 py-4 md:py-10">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-6 mb-6 md:mb-10">
+        <div className="flex items-center gap-2 md:gap-3">
+          <CalendarIcon className="w-6 h-6 md:w-10 md:h-10 text-red-700 shrink-0" />
+          <div>
+            <h1 className="text-xl md:text-4xl font-black text-gray-900 tracking-tight leading-none">
+              2026 <span className="text-red-700">校历规划</span>
+            </h1>
+            <p className="text-[10px] md:text-base text-gray-500 mt-0.5 md:mt-2 font-medium">北师大 · 25-26学年第二学期</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
-          <div className="flex items-center gap-1 bg-white p-1 rounded-xl shadow-sm border border-gray-200">
-            <button onClick={prevMonth} disabled={currentMonthIdx === 0} className="p-1 md:p-2 hover:bg-gray-100 disabled:opacity-30 rounded-lg transition-colors"><ChevronLeft className="w-4 h-4 md:w-5 h-5" /></button>
-            <div className="flex gap-0.5 md:gap-1 px-1">
-              {months.map((m, idx) => (
-                <button key={m} onClick={() => setCurrentMonthIdx(idx)} className={`px-2 md:px-4 py-1 md:py-1.5 text-[10px] md:text-sm font-bold rounded-lg transition-all duration-200 ${currentMonthIdx === idx ? 'bg-red-700 text-white shadow-md' : 'text-gray-500 hover:bg-gray-100'}`}>{m + 1}月</button>
-              ))}
-            </div>
-            <button onClick={nextMonth} disabled={currentMonthIdx === months.length - 1} className="p-1 md:p-2 hover:bg-gray-100 disabled:opacity-30 rounded-lg transition-colors"><ChevronRight className="w-4 h-4 md:w-5 h-5" /></button>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowCourseManager(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-xs md:text-sm font-semibold rounded-xl hover:bg-blue-700 shadow-md transition-all active:scale-95"
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>课程管理</span>
-            </button>
-            <button
-              onClick={handleExportPDF}
-              disabled={isExporting}
-              className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-xs md:text-sm font-semibold rounded-xl hover:bg-gray-800 transition-all shadow-md disabled:opacity-50 active:scale-95"
-            >
-              {isExporting ? <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent"></div> : <FileDown className="w-4 h-4" />}
-              <span>{isExporting ? '生成PDF中...' : '导出PDF'}</span>
-            </button>
-          </div>
+        <div className="flex items-center gap-2 md:gap-3">
+          <button 
+            onClick={() => setShowCourseManager(true)}
+            className="flex-1 md:flex-none flex items-center justify-center gap-1.5 bg-white text-gray-700 px-3 md:px-5 py-2 rounded-xl border border-gray-200 text-xs md:text-base font-bold hover:bg-gray-50 transition-all shadow-sm"
+          >
+            <BookOpen className="w-4 h-4 text-blue-600" />
+            <span className="whitespace-nowrap">课程管理</span>
+          </button>
+          
+          <button 
+            onClick={handleExportPDF}
+            disabled={isExporting}
+            className={`flex-1 md:flex-none flex items-center justify-center gap-1.5 bg-red-700 text-white px-3 md:px-5 py-2 rounded-xl text-xs md:text-base font-bold hover:bg-red-800 transition-all shadow-lg shadow-red-100 disabled:opacity-50`}
+          >
+            {isExporting ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <FileDown className="w-4 h-4" />
+            )}
+            <span className="whitespace-nowrap">导出 PDF</span>
+          </button>
         </div>
       </header>
 
+      <div className="bg-white p-3 md:p-6 rounded-2xl shadow-sm border border-gray-100 mb-6 flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6">
+        <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto">
+          <button 
+            onClick={() => setViewMode('month')}
+            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-1.5 md:py-2 rounded-lg text-xs md:text-base font-bold transition-all ${
+              viewMode === 'month' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            月视图
+          </button>
+          <button 
+            onClick={() => switchToWeekView()}
+            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-1.5 md:py-2 rounded-lg text-xs md:text-base font-bold transition-all ${
+              viewMode === 'week' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <List className="w-3.5 h-3.5" />
+            周视图
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 md:gap-4 w-full md:w-auto justify-between md:justify-end">
+          {viewMode === 'month' ? (
+            <div className="flex items-center bg-gray-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto scrollbar-hide">
+              {months.map((m, idx) => (
+                <button
+                  key={m}
+                  onClick={() => setCurrentMonthIdx(idx)}
+                  className={`flex-none px-3 md:px-5 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-bold transition-all whitespace-nowrap ${
+                    currentMonthIdx === idx 
+                      ? 'bg-white text-red-700 shadow-sm' 
+                      : 'text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  {m + 1}月
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={prevWeek}
+                  className="p-2 md:p-3 rounded-xl bg-gray-100 hover:bg-gray-200 transition-all text-gray-700"
+                >
+                  <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
+                </button>
+                <div className="text-lg md:text-2xl font-black text-gray-900 min-w-[80px] md:min-w-[100px] text-center">
+                  第 {currentWeekNum} 周
+                </div>
+                <button 
+                  onClick={nextWeek}
+                  className="p-2 md:p-3 rounded-xl bg-gray-100 hover:bg-gray-200 transition-all text-gray-700"
+                >
+                  <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-2 py-1 md:px-3 md:py-1.5">
+                <Hash className="w-3.5 h-3.5 text-gray-400 hidden md:block" />
+                <select 
+                  value={currentWeekNum}
+                  onChange={(e) => setCurrentWeekNum(parseInt(e.target.value))}
+                  className="bg-transparent text-xs md:text-sm font-bold text-gray-700 outline-none cursor-pointer"
+                >
+                  {Array.from({length: maxWeeks}, (_, i) => i + 1).map(w => (
+                    <option key={w} value={w}>第 {w} 周</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div id="calendar-view" className="relative">
+        {viewMode === 'month' ? (
+          <MonthlyCalendar 
+            year={year} 
+            month={months[currentMonthIdx]} 
+            notes={notes}
+            courses={courses}
+            onNoteChange={handleNoteChange}
+            onDayClick={handleDayJump}
+          />
+        ) : (
+          <WeeklyCalendar 
+            weekNum={currentWeekNum} 
+            notes={notes}
+            courses={courses}
+            onNoteChange={handleNoteChange}
+          />
+        )}
+      </div>
+
       {showCourseManager && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
-            <div className="p-4 md:p-6 border-b flex justify-between items-center">
-              <h3 className="text-xl font-bold flex items-center gap-2 text-gray-800">
-                <BookOpen className="w-5 h-5 text-blue-600" />
-                课程管理与导入
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-6 border-b flex items-center justify-between bg-gray-50">
+              <h3 className="text-xl md:text-2xl font-black text-gray-900 flex items-center gap-2">
+                <BookOpen className="w-6 h-6 md:w-7 md:h-7 text-blue-600" />
+                课程管理
               </h3>
-              <button onClick={() => setShowCourseManager(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-6 h-6 text-gray-400" /></button>
+              <button onClick={() => setShowCourseManager(false)} className="p-2 hover:bg-gray-200 rounded-full transition-all">
+                <X className="w-5 h-5 md:w-6 md:h-6" />
+              </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-8">
-              <section>
-                <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
-                  <Plus className="w-4 h-4" /> 新增课程
-                </h4>
-                <form onSubmit={handleAddCourse} className="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
-                  <div className="w-full">
-                    <label className="block text-xs font-bold text-gray-500 mb-1">课程名称</label>
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8">
+              <form onSubmit={handleAddCourse} className="bg-blue-50/50 p-4 md:p-6 rounded-2xl border border-blue-100 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider">课程名称</label>
                     <input 
                       type="text" 
-                      placeholder="例如：量子力学" 
-                      className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                       value={newCourse.name}
                       onChange={e => setNewCourse({...newCourse, name: e.target.value})}
+                      placeholder="例如: 高等数学"
+                      className="w-full px-3 py-2 text-sm md:text-base rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                     />
                   </div>
-                  
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2">上课时间（可多选）</label>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider">课程颜色</label>
                     <div className="flex flex-wrap gap-2">
-                      {[1, 2, 3, 4, 5, 6, 7].map(day => (
-                        <button
-                          key={day}
-                          type="button"
-                          onClick={() => toggleWeekday(day)}
-                          className={`flex-1 min-w-[50px] py-2 px-1 text-sm font-bold rounded-lg border transition-all ${
-                            newCourse.weekdays?.includes(day)
-                              ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                              : 'bg-white border-gray-200 text-gray-500 hover:border-blue-300 hover:text-blue-500'
-                          }`}
-                        >
-                          周{WEEK_DAY_LABELS[day-1]}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2">标识颜色</label>
-                    <div className="flex flex-wrap gap-3">
                       {COURSE_COLORS.map(color => (
                         <button
                           key={color.hex}
                           type="button"
                           onClick={() => setNewCourse({...newCourse, color: color.hex})}
-                          className={`w-8 h-8 rounded-full border-2 transition-transform ${
-                            newCourse.color === color.hex ? 'border-gray-900 scale-110 shadow-md' : 'border-transparent hover:scale-105'
-                          }`}
+                          className={`w-6 h-6 md:w-8 md:h-8 rounded-full border-2 transition-all ${newCourse.color === color.hex ? 'border-gray-900 scale-110 shadow-md' : 'border-transparent hover:scale-105'}`}
                           style={{ backgroundColor: color.hex }}
-                          title={color.name}
                         />
                       ))}
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="flex-1">
-                      <label className="block text-xs font-bold text-gray-500 mb-1">起始周</label>
-                      <input 
-                        type="number" 
-                        min="1" max="20" 
-                        className="w-full p-2 border rounded-lg outline-none bg-white"
-                        value={newCourse.startWeek}
-                        onChange={e => setNewCourse({...newCourse, startWeek: parseInt(e.target.value)})}
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-xs font-bold text-gray-500 mb-1">结束周</label>
-                      <input 
-                        type="number" 
-                        min="1" max="20" 
-                        className="w-full p-2 border rounded-lg outline-none bg-white"
-                        value={newCourse.endWeek}
-                        onChange={e => setNewCourse({...newCourse, endWeek: parseInt(e.target.value)})}
-                      />
-                    </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider">上课时间</label>
+                  <div className="flex flex-wrap gap-1.5 md:gap-2">
+                    {['一', '二', '三', '四', '五', '六', '日'].map((day, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          const current = newCourse.weekdays || [];
+                          if (current.includes(i + 1)) {
+                            setNewCourse({ ...newCourse, weekdays: current.filter(d => d !== i + 1) });
+                          } else {
+                            setNewCourse({ ...newCourse, weekdays: [...current, i + 1].sort() });
+                          }
+                        }}
+                        className={`w-8 h-8 md:w-10 md:h-10 text-xs md:text-sm rounded-xl font-bold transition-all border ${
+                          newCourse.weekdays?.includes(i + 1) 
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        {day}
+                      </button>
+                    ))}
                   </div>
-                  
-                  <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200 active:scale-[0.98]">
-                    保存课程
-                  </button>
-                </form>
-              </section>
-
-              <section>
-                <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
-                  <Trash2 className="w-4 h-4" /> 我的课程列表 ({courses.length})
-                </h4>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider">起始周</label>
+                    <input 
+                      type="number" 
+                      min="1" max="18"
+                      value={newCourse.startWeek}
+                      onChange={e => setNewCourse({...newCourse, startWeek: parseInt(e.target.value)})}
+                      className="w-full px-3 py-2 text-sm md:text-base rounded-xl border border-gray-200 outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider">结束周</label>
+                    <input 
+                      type="number" 
+                      min="1" max="18"
+                      value={newCourse.endWeek}
+                      onChange={e => setNewCourse({...newCourse, endWeek: parseInt(e.target.value)})}
+                      className="w-full px-3 py-2 text-sm md:text-base rounded-xl border border-gray-200 outline-none"
+                    />
+                  </div>
+                </div>
+                <button 
+                  type="submit"
+                  className="w-full bg-blue-600 text-white font-bold py-2.5 md:py-3 rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-2 text-sm md:text-base shadow-lg shadow-blue-100"
+                >
+                  <Plus className="w-4 h-4 md:w-5 md:h-5" />
+                  添加课程
+                </button>
+              </form>
+              <div className="space-y-4">
+                <h4 className="text-base md:text-lg font-bold text-gray-800">已添加课程 ({courses.length})</h4>
                 {courses.length === 0 ? (
-                  <div className="text-center py-8 text-gray-400 border-2 border-dashed rounded-xl">暂无导入课程</div>
+                  <div className="text-center py-8 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-xs md:text-sm">暂无课程</div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="grid grid-cols-1 gap-3">
                     {courses.map(course => (
-                      <div key={course.id} className="flex items-center justify-between p-3 bg-white border rounded-xl hover:border-blue-200 transition-colors group shadow-sm">
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: course.color }} />
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold text-gray-800 truncate">{course.name}</p>
-                            <p className="text-xs text-gray-500">
-                              周{course.weekdays.map(d => WEEK_DAY_LABELS[d-1]).join(', ')} | 第 {course.startWeek} - {course.endWeek} 周
-                            </p>
+                      <div key={course.id} className="flex items-center justify-between p-3 md:p-4 bg-white border border-gray-100 rounded-2xl shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="w-2 h-8 rounded-full" style={{ backgroundColor: course.color }} />
+                          <div>
+                            <div className="font-bold text-gray-900 text-sm md:text-base">{course.name}</div>
+                            <div className="text-[10px] md:text-xs text-gray-500">周 {course.weekdays.join(', ')} · {course.startWeek}-{course.endWeek} 周</div>
                           </div>
                         </div>
-                        <button onClick={() => deleteCourse(course.id)} className="p-2 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors ml-2">
-                          <Trash2 className="w-4 h-4" />
+                        <button onClick={() => deleteCourse(course.id)} className="p-2 text-gray-300 hover:text-red-600 transition-all">
+                          <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
                         </button>
                       </div>
                     ))}
                   </div>
                 )}
-              </section>
+              </div>
             </div>
-            
-            <div className="p-4 bg-gray-50 border-t text-center text-xs text-gray-400">
-              提示：课程录入后将自动同步至所有对应的日期格子中
+            <div className="p-4 md:p-6 bg-gray-50 border-t">
+              <button onClick={() => setShowCourseManager(false)} className="w-full bg-gray-900 text-white font-bold py-2.5 md:py-3 rounded-xl hover:bg-black transition-all">完成</button>
             </div>
           </div>
         </div>
       )}
-
-      <div className="mb-4 flex items-start gap-2 p-3 bg-blue-50 border border-blue-100 rounded-xl text-blue-800 text-[10px] md:text-sm shadow-sm">
-        <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-        <p>
-          <span className="font-bold">个性化设置：</span>
-          现在您可以为不同课程设置专属颜色标识。校历事项固定为红色。
-        </p>
-      </div>
-
-      <main className="w-full relative">
-        <MonthlyCalendar
-          id="calendar-view"
-          year={year}
-          month={months[currentMonthIdx]}
-          notes={notes}
-          courses={courses}
-          onNoteChange={handleNoteChange}
-        />
-      </main>
-
-      <footer className="mt-8 text-center text-gray-400 text-[10px] md:text-sm pb-8">
-        &copy; 2026 BNU Academic Planner | 浏览器本地存储已启用
-      </footer>
-
-      <div className="fixed bottom-4 right-4 bg-white/90 backdrop-blur px-3 py-1.5 rounded-full shadow-lg border border-gray-200 text-[8px] md:text-xs text-gray-500 font-medium z-40">
-        已实时保存
-      </div>
     </div>
   );
 };
