@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -11,31 +10,36 @@
     <link rel="apple-touch-icon" href="https://img.icons8.com/color/192/calendar--v1.png">
     <title>2026校历规划器</title>
     <script src="https://cdn.tailwindcss.com"></script>
+<script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@19.0.0",
-    "react/": "https://esm.sh/react@19.0.0/",
-    "react-dom": "https://esm.sh/react-dom@19.0.0",
-    "react-dom/": "https://esm.sh/react-dom@19.0.0/",
-    "jspdf": "https://esm.sh/jspdf@2.5.1",
-    "lucide-react": "https://esm.sh/lucide-react@0.462.0",
-    "html2canvas": "https://esm.sh/html2canvas@1.4.1"
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "html2canvas": "https://esm.sh/html2canvas@^1.4.1",
+    "jspdf": "https://esm.sh/jspdf@^4.0.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
   }
 }
 </script>
 </head>
 <body class="bg-gray-50 min-h-screen">
     <div id="root"></div>
+    
+    <!-- 关键：Vite 项目的入口脚本 -->
+    <script type="module" src="./index.tsx"></script>
+
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js').then(registration => {
-                    console.log('SW registered: ', registration);
-                }).catch(registrationError => {
-                    console.log('SW registration failed: ', registrationError);
+                    console.log('SW registered');
+                }).catch(err => {
+                    console.log('SW registration failed: ', err);
                 });
             });
         }
     </script>
 </body>
-</html>
